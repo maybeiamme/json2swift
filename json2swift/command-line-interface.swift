@@ -10,6 +10,130 @@ import Foundation
 
 typealias ErrorMessage = String
 
+func run( withArguments arguments : [String], completion: ((_ result:ErrorMessage?) -> Void)!) {
+    guard arguments.isEmpty == false else {
+        completion( "Please provide a JSON file path or directory path." )
+        return
+    }
+    
+    if arguments[0].contains("http://") || arguments[0].contains("https://") {
+        var path = arguments[0]
+        let session = URLSession.shared
+        
+        let url = URL( string : path )
+        let task = session.dataTask(with: url!, completionHandler: { (data, response, error) in
+            
+            if error != nil {
+                completion( "Failed to retreve json data from url" )
+                return
+            }
+            let jsonResult = String(data: data!, encoding: .utf8)
+            do {
+                try jsonResult?.write(toFile: "./MODEL.txt", atomically: true, encoding: String.Encoding.utf8)
+            }
+            catch _ {
+                completion( "Unable to write temp file from data" )
+                return
+            }
+            path = "./MODEL.txt"
+            
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+                completion( "No such file or directory exists." )
+                return
+            }
+            
+            let jsonFilePaths: [String]
+            if isDirectory.boolValue {
+                guard let filePaths = findJSONFilePaths(in: path) else {
+                    completion( "Unable to read contents of directory." )
+                    return
+                }
+                guard filePaths.isEmpty == false else {
+                    completion( "The directory does not contain any JSON files." )
+                    return
+                }
+                jsonFilePaths = filePaths
+            }
+            else {
+                jsonFilePaths = [path]
+            }
+            
+            let jsonUtilitiesFilePath: String? = jsonFilePaths.count > 1
+                ? (path as NSString).appendingPathComponent("JSONUtilities.swift")
+                : nil
+            
+            let shouldIncludeUtils = jsonUtilitiesFilePath == nil
+            for jsonFilePath in jsonFilePaths {
+                if let errorMessage = generateSwiftFileBasedOnJSON(inFile: jsonFilePath, includeJSONUtilities: shouldIncludeUtils) {
+                    completion( errorMessage )
+                    return
+                }
+            }
+            
+            if let jsonUtilitiesFilePath = jsonUtilitiesFilePath {
+                guard writeJSONUtilitiesFile(to: jsonUtilitiesFilePath) else {
+                    completion( "Unable to write JSON utilities file to \(jsonUtilitiesFilePath)" )
+                    return
+                }
+            }
+            
+            do {
+                try FileManager.default.removeItem(atPath: "./MODEL.txt" )
+            }
+            catch _ {
+                completion( "Unable remove temp file" )
+                return
+            }
+            completion( nil )
+        })
+        task.resume()
+        
+    } else {
+        let path = (arguments[0] as NSString).resolvingSymlinksInPath
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            completion( "No such file or directory exists." )
+            return
+        }
+        
+        let jsonFilePaths: [String]
+        if isDirectory.boolValue {
+            guard let filePaths = findJSONFilePaths(in: path) else {
+                completion( "Unable to read contents of directory." )
+                return
+            }
+            guard filePaths.isEmpty == false else {
+                completion( "The directory does not contain any JSON files." )
+                return
+            }
+            jsonFilePaths = filePaths
+        }
+        else {
+            jsonFilePaths = [path]
+        }
+        
+        let jsonUtilitiesFilePath: String? = jsonFilePaths.count > 1
+            ? (path as NSString).appendingPathComponent("JSONUtilities.swift")
+            : nil
+        
+        let shouldIncludeUtils = jsonUtilitiesFilePath == nil
+        for jsonFilePath in jsonFilePaths {
+            if let errorMessage = generateSwiftFileBasedOnJSON(inFile: jsonFilePath, includeJSONUtilities: shouldIncludeUtils) {
+                completion( errorMessage )
+                return
+            }
+        }
+        
+        if let jsonUtilitiesFilePath = jsonUtilitiesFilePath {
+            guard writeJSONUtilitiesFile(to: jsonUtilitiesFilePath) else {
+                completion( "Unable to write JSON utilities file to \(jsonUtilitiesFilePath)" )
+                return
+            }
+        }
+    }
+}
+
 func run(with arguments: [String]) -> ErrorMessage? {
     guard arguments.isEmpty == false else { return "Please provide a JSON file path or directory path." }
     
@@ -31,7 +155,7 @@ func run(with arguments: [String]) -> ErrorMessage? {
     let jsonUtilitiesFilePath: String? = jsonFilePaths.count > 1
         ? (path as NSString).appendingPathComponent("JSONUtilities.swift")
         : nil
-
+    
     let shouldIncludeUtils = jsonUtilitiesFilePath == nil
     for jsonFilePath in jsonFilePaths {
         if let errorMessage = generateSwiftFileBasedOnJSON(inFile: jsonFilePath, includeJSONUtilities: shouldIncludeUtils) {
